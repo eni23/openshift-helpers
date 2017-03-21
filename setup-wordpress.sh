@@ -1,5 +1,7 @@
 #!/bin/bash
 
+
+echo "Installing wordpress"
 cp /opt/app-root/src/wp-config-sample.php /opt/app-root/src/wp-config.php
 
 sed -i "s/database_name_here/wordpress/g" /opt/app-root/src/wp-config.php
