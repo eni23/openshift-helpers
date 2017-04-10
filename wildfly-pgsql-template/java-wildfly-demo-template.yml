@@ -1,0 +1,209 @@
+---
+kind: Template
+apiVersion: v1
+metadata:
+  name: java-pgsql-example
+  annotations:
+    openshift.io/display-name: Wildfly + PgSQL (Ephemeral)
+    description: |-
+      An example Java application with a PgSQL database.
+
+      NOTE: The PGSQL service created by this template uses non-persistent storage. To setup persisted storage, change this template to use a persistent volume claim instead of emptydir.
+    tags: instant-app,java,wildfly
+    iconClass: wildfly
+message: |-
+  The following service(s) have been created in your project: ${NAME}, ${DATABASE_SERVICE_NAME}.
+
+labels:
+  template: java-pgsql-example
+objects:
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: java-pgsql-example
+    annotations:
+      description: Exposes and load balances the application pods
+      service.alpha.openshift.io/dependencies: '[{"name": "${DATABASE_SERVICE_NAME}",
+        "kind": "Service"}]'
+  spec:
+    ports:
+    - name: web
+      port: 8080
+      targetPort: 8080
+    selector:
+      name: java-pgsql-example
+- kind: Route
+  apiVersion: v1
+  metadata:
+    name: java-pgsql-example
+  spec:
+    host: "${APPLICATION_DOMAIN}"
+    to:
+      kind: Service
+      name: java-pgsql-example
+- kind: ImageStream
+  apiVersion: v1
+  metadata:
+    name: java-pgsql-example
+    annotations:
+      description: Keeps track of changes in the application image
+- kind: BuildConfig
+  apiVersion: v1
+  metadata:
+    name: java-pgsql-example
+    annotations:
+      description: Defines how to build the application
+  spec:
+    source:
+      type: Git
+      git:
+        uri: "${SOURCE_REPOSITORY_URL}"
+        ref: "${SOURCE_REPOSITORY_REF}"
+      contextDir: "${CONTEXT_DIR}"
+    strategy:
+      type: Source
+      sourceStrategy:
+        from:
+          kind: ImageStreamTag
+          namespace: openshift
+          name: wildfly:10.0
+    output:
+      to:
+        kind: ImageStreamTag
+        name: java-pgsql-example:latest
+    triggers:
+    - type: ImageChange
+    - type: ConfigChange
+    - type: GitHub
+      github:
+        secret: "${GITHUB_WEBHOOK_SECRET}"
+
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: java-pgsql-example
+    annotations:
+      description: Defines how to deploy the application server
+  spec:
+    strategy:
+      type: Rolling
+    triggers:
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+        - java-pgsql-example
+        from:
+          kind: ImageStreamTag
+          name: java-pgsql-example:latest
+    - type: ConfigChange
+    replicas: 1
+    selector:
+      name: java-pgsql-example
+    template:
+      metadata:
+        name: java-pgsql-example
+        labels:
+          name: java-pgsql-example
+      spec:
+        containers:
+        - name: java-pgsql-example
+          image: java-pgsql-example
+          ports:
+          - containerPort: 8080
+          env:
+          - name: DATABASE_SERVICE_NAME
+            value: "${DATABASE_SERVICE_NAME}"
+          - name: POSTGRESQL_DATABASE
+            value: "${DATABASE_NAME}"
+          - name: POSTGRESQL_USER
+            value: "${DATABASE_USER}"
+          - name: POSTGRESQL_PASSWORD
+            value: "${DATABASE_PASSWORD}"
+          volumeMounts:
+          - name: "${DATABASE_SERVICE_NAME}-data"
+            mountPath: "/var/lib/pgsql/data"
+        volumes:
+        - name: "${DATABASE_SERVICE_NAME}-data"
+          emptyDir:
+            medium: ''
+
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: "${DATABASE_SERVICE_NAME}"
+    annotations:
+      description: Exposes the database server
+  spec:
+    ports:
+    - name: pgsql
+      port: 5432
+      targetPort: 5432
+    selector:
+      name: "${DATABASE_SERVICE_NAME}"
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: "${DATABASE_SERVICE_NAME}"
+    annotations:
+      description: Defines how to deploy the database
+  spec:
+    strategy:
+      type: Recreate
+    triggers:
+    - type: ConfigChange
+    replicas: 1
+    selector:
+      name: "${DATABASE_SERVICE_NAME}"
+    template:
+      metadata:
+        name: "${DATABASE_SERVICE_NAME}"
+        labels:
+          name: "${DATABASE_SERVICE_NAME}"
+      spec:
+        containers:
+        - name: pgsql
+          image: "${PGSQL_IMAGE}"
+          ports:
+          - containerPort: 5432
+          env:
+          - name: POSTGRESQL_USER
+            value: "${DATABASE_USER}"
+          - name: POSTGRESQL_PASSWORD
+            value: "${DATABASE_PASSWORD}"
+          - name: POSTGRESQL_DATABASE
+            value: "${DATABASE_NAME}"
+parameters:
+- name: SOURCE_REPOSITORY_URL
+  description: The URL of the repository with your application source code
+  value: https://github.com/adfinis-sygroup/openshift-jee-sample
+- name: SOURCE_REPOSITORY_REF
+  description: Set this to a branch name, tag or other ref of your repository if you
+    are not using the default branch
+- name: CONTEXT_DIR
+  description: Set this to the relative path to your project if it is not in the root
+    of your repository
+- name: APPLICATION_DOMAIN
+  description: The exposed hostname that will route to the demo service, if left
+    blank a value will be defaulted.
+  value: ''
+- name: GITHUB_WEBHOOK_SECRET
+  description: A secret string used to configure the GitHub webhook
+  generate: expression
+  from: "[a-zA-Z0-9]{40}"
+- name: DATABASE_SERVICE_NAME
+  description: Database service name
+  value: postgresql
+- name: DATABASE_NAME
+  description: Database name
+  value: sampledb
+- name: DATABASE_USER
+  description: Database user name
+  value: sapmleuser
+- name: DATABASE_PASSWORD
+  description: Database user password
+  generate: expression
+  from: "[a-zA-Z0-9]{16}"
+- name: PGSQL_IMAGE
+  description: Image to use for pgsql
+  value: rhscl/postgresql-95-rhel7
